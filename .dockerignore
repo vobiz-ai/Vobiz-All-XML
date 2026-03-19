@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+venv/
+env/
+.venv/
+
+# Secrets (never bake into image)
+.env
+.env.local
+
+# Git
+.git/
+.gitignore
+
+# Docs
+README.md
+llms.txt
+llm.txt
+
+# Render
+render.yaml
+Procfile
+
+# Local dev
+*.log
+logs/
+ngrok.yml

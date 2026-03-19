@@ -1,0 +1,39 @@
+version: "3.9"
+
+services:
+  vobiz-agent:
+    build: .
+    container_name: vobiz-agent
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # --- Required ---
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
+      - VOBIZ_AUTH_ID=${VOBIZ_AUTH_ID}
+      - VOBIZ_AUTH_TOKEN=${VOBIZ_AUTH_TOKEN}
+      - FROM_NUMBER=${FROM_NUMBER}
+      - TO_NUMBER=${TO_NUMBER}
+
+      # --- Production URL (set to your EC2 public DNS) ---
+      # Example: PUBLIC_URL=https://ec2-13-233-xx-xx.ap-south-1.compute.amazonaws.com
+      - PUBLIC_URL=${PUBLIC_URL}
+
+      # --- Optional ---
+      - SERVER_MODE=${SERVER_MODE:-stream}
+      - OPENAI_TTS_VOICE=${OPENAI_TTS_VOICE:-alloy}
+      - AGENT_SYSTEM_PROMPT=${AGENT_SYSTEM_PROMPT:-You are a helpful AI phone assistant. Be concise and conversational. Keep responses under 2 sentences.}
+      - DIAL_TEST_NUMBER=${DIAL_TEST_NUMBER:-}
+      - HTTP_PORT=8000
+      - AGENT_WS_PORT=8001
+
+    # Load from .env file if present
+    env_file:
+      - .env
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
