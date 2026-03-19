@@ -2,7 +2,11 @@
 agent.py — WebSocket Voice Agent
 =================================
 Handles bidirectional audio streaming with Vobiz.
-Pipeline: Vobiz Audio → Deepgram STT → OpenAI LLM → OpenAI TTS → Vobiz playAudio
+Pipeline: Vobiz Audio -> Deepgram STT -> OpenAI LLM (with function calling) -> OpenAI TTS -> Vobiz playAudio
+
+The agent can trigger Vobiz XML actions via the Call Transfer API:
+- transfer_call: Transfer the caller to another phone number
+- end_call: Hang up the call gracefully
 """
 
 import os
@@ -13,6 +17,7 @@ import logging
 import struct
 
 import websockets
+import requests as sync_requests
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
@@ -29,7 +34,15 @@ AGENT_SYSTEM_PROMPT = os.getenv(
     "You are a helpful AI phone assistant. Be concise and conversational. Keep responses under 2 sentences.",
 )
 
-WS_PORT = int(os.getenv("AGENT_WS_PORT", "5001"))
+# Vobiz API credentials (for call transfer/hangup)
+VOBIZ_AUTH_ID = os.getenv("VOBIZ_AUTH_ID", "")
+VOBIZ_AUTH_TOKEN = os.getenv("VOBIZ_AUTH_TOKEN", "")
+VOBIZ_API_BASE = "https://api.vobiz.ai/api/v1"
+
+# Server URL (set by server.py at runtime via environment)
+NGROK_URL = os.getenv("NGROK_URL", "")
+
+WS_PORT = int(os.getenv("AGENT_WS_PORT", "8001"))
 
 # Audio settings for Vobiz (mulaw 8kHz)
 VOBIZ_SAMPLE_RATE = 8000
@@ -42,6 +55,80 @@ logger = logging.getLogger("agent")
 # OpenAI client (used for both LLM and TTS)
 # ---------------------------------------------------------------------------
 openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+
+
+# ---------------------------------------------------------------------------
+# OpenAI Function Calling — Tool definitions
+# ---------------------------------------------------------------------------
+
+AGENT_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "transfer_call",
+            "description": (
+                "Transfer the current phone call to another phone number. "
+                "Use this when the caller asks to be transferred to a person, "
+                "department, or specific phone number."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "phone_number": {
+                        "type": "string",
+                        "description": (
+                            "The phone number to transfer to, in E.164 format "
+                            "(e.g., +919876543210 or +14155551234). "
+                            "Include country code."
+                        ),
+                    },
+                    "announcement": {
+                        "type": "string",
+                        "description": (
+                            "A brief message to say to the caller before "
+                            "transferring (e.g., 'Transferring you now, please hold.')"
+                        ),
+                    },
+                },
+                "required": ["phone_number"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "end_call",
+            "description": (
+                "End/hang up the current phone call gracefully. "
+                "Use this when the caller says goodbye, wants to end the call, "
+                "or the conversation has reached a natural conclusion."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "goodbye_message": {
+                        "type": "string",
+                        "description": (
+                            "A brief goodbye message to say before hanging up "
+                            "(e.g., 'Goodbye! Have a great day!')"
+                        ),
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+]
+
+# Augment the system prompt with tool context
+AUGMENTED_SYSTEM_PROMPT = (
+    AGENT_SYSTEM_PROMPT
+    + "\n\nYou have access to call control tools:\n"
+    "- transfer_call: Use when the caller wants to be connected to another person or number.\n"
+    "- end_call: Use when the caller says goodbye or wants to hang up.\n"
+    "When a user asks to transfer, extract the phone number and use transfer_call. "
+    "Always include the country code (e.g., +91 for India)."
+)
 
 
 # ---------------------------------------------------------------------------
@@ -130,24 +217,149 @@ async def generate_tts_audio(text: str) -> bytes:
 
 
 # ---------------------------------------------------------------------------
-# OpenAI LLM — generate response
+# OpenAI LLM — generate response (with function calling)
 # ---------------------------------------------------------------------------
 
-async def get_llm_response(conversation_history: list[dict]) -> str:
-    """Get a response from OpenAI given conversation history."""
+async def get_llm_response(conversation_history: list[dict]) -> tuple:
+    """
+    Get a response from OpenAI given conversation history.
+    Returns (text_response, tool_calls) where tool_calls is a list of
+    function calls to execute, or None if it's a regular text response.
+    """
     try:
         response = await openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=conversation_history,
             max_tokens=150,
             temperature=0.7,
+            tools=AGENT_TOOLS,
+            tool_choice="auto",
         )
-        reply = response.choices[0].message.content.strip()
+        choice = response.choices[0]
+        message = choice.message
+
+        # Check if the model wants to call a function
+        if message.tool_calls:
+            logger.info(
+                f"LLM tool calls: {[tc.function.name for tc in message.tool_calls]}"
+            )
+            return None, message.tool_calls, message
+
+        reply = message.content.strip() if message.content else ""
         logger.info(f"LLM response: {reply[:80]}...")
-        return reply
+        return reply, None, message
+
     except Exception as e:
         logger.error(f"OpenAI error: {e}")
-        return "I'm sorry, I'm having trouble processing that. Could you repeat?"
+        return "I'm sorry, I'm having trouble processing that. Could you repeat?", None, None
+
+
+# ---------------------------------------------------------------------------
+# Vobiz Call Control API — transfer & hangup
+# ---------------------------------------------------------------------------
+
+def _get_ngrok_url() -> str:
+    """Get the current ngrok URL from the running server."""
+    global NGROK_URL
+    if NGROK_URL:
+        return NGROK_URL
+    # Try auto-detect from server health endpoint
+    try:
+        port = os.getenv("HTTP_PORT", "8000")
+        resp = sync_requests.get(f"http://127.0.0.1:{port}/health", timeout=2)
+        data = resp.json()
+        NGROK_URL = data.get("ngrok_url", "")
+        return NGROK_URL
+    except Exception:
+        logger.warning("Could not auto-detect ngrok URL")
+        return ""
+
+
+def transfer_call_api(call_uuid: str, phone_number: str, announcement: str = "") -> bool:
+    """
+    Transfer a live call using the Vobiz Call Transfer API.
+    Redirects the A-leg to a new URL that returns <Dial> XML.
+    """
+    if not VOBIZ_AUTH_ID or not VOBIZ_AUTH_TOKEN:
+        logger.error("Cannot transfer: VOBIZ_AUTH_ID/TOKEN not set")
+        return False
+
+    ngrok_url = _get_ngrok_url()
+    if not ngrok_url:
+        logger.error("Cannot transfer: ngrok URL not available")
+        return False
+
+    # URL-encode the phone number and announcement as query params
+    import urllib.parse
+    params = urllib.parse.urlencode({
+        "number": phone_number,
+        "announcement": announcement or f"Transferring your call to {phone_number}. Please hold.",
+    })
+    transfer_url = f"{ngrok_url}/transfer-to-number?{params}"
+
+    url = f"{VOBIZ_API_BASE}/Account/{VOBIZ_AUTH_ID}/Call/{call_uuid}/"
+    headers = {
+        "Content-Type": "application/json",
+        "X-Auth-ID": VOBIZ_AUTH_ID,
+        "X-Auth-Token": VOBIZ_AUTH_TOKEN,
+    }
+    payload = {
+        "legs": "aleg",
+        "aleg_url": transfer_url,
+        "aleg_method": "POST",
+    }
+
+    try:
+        logger.info(f"Calling Transfer API: {url}")
+        logger.info(f"  Transfer URL: {transfer_url}")
+        resp = sync_requests.post(url, json=payload, headers=headers, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        logger.info(f"Transfer API response: {data}")
+        return True
+    except Exception as e:
+        logger.error(f"Transfer API error: {e}")
+        return False
+
+
+def hangup_call_api(call_uuid: str) -> bool:
+    """
+    Hang up a live call using the Vobiz Hangup API.
+    Redirects to an endpoint that returns <Hangup> XML.
+    """
+    if not VOBIZ_AUTH_ID or not VOBIZ_AUTH_TOKEN:
+        logger.error("Cannot hangup: VOBIZ_AUTH_ID/TOKEN not set")
+        return False
+
+    ngrok_url = _get_ngrok_url()
+    if not ngrok_url:
+        logger.error("Cannot hangup: ngrok URL not available")
+        return False
+
+    hangup_url = f"{ngrok_url}/agent-hangup"
+
+    url = f"{VOBIZ_API_BASE}/Account/{VOBIZ_AUTH_ID}/Call/{call_uuid}/"
+    headers = {
+        "Content-Type": "application/json",
+        "X-Auth-ID": VOBIZ_AUTH_ID,
+        "X-Auth-Token": VOBIZ_AUTH_TOKEN,
+    }
+    payload = {
+        "legs": "aleg",
+        "aleg_url": hangup_url,
+        "aleg_method": "POST",
+    }
+
+    try:
+        logger.info(f"Calling Hangup API: {url}")
+        resp = sync_requests.post(url, json=payload, headers=headers, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        logger.info(f"Hangup API response: {data}")
+        return True
+    except Exception as e:
+        logger.error(f"Hangup API error: {e}")
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -181,7 +393,7 @@ class CallSession:
         self.call_id: str | None = None
         self.is_playing = False
         self.conversation_history: list[dict] = [
-            {"role": "system", "content": AGENT_SYSTEM_PROMPT}
+            {"role": "system", "content": AUGMENTED_SYSTEM_PROMPT}
         ]
         self.transcript_buffer = ""
         self.silence_timer: asyncio.Task | None = None
@@ -281,19 +493,124 @@ class CallSession:
             # Add user message to conversation
             self.conversation_history.append({"role": "user", "content": user_text})
 
-            # Get LLM response
-            response_text = await get_llm_response(self.conversation_history)
-            self.conversation_history.append({"role": "assistant", "content": response_text})
+            # Get LLM response (may include tool calls)
+            response_text, tool_calls, raw_message = await get_llm_response(
+                self.conversation_history
+            )
 
-            # Generate TTS and play back
-            audio_data = await generate_tts_audio(response_text)
-            if audio_data:
-                await self._play_audio(audio_data)
+            if tool_calls:
+                # LLM wants to call a function
+                # Add the assistant message with tool_calls to history
+                self.conversation_history.append({
+                    "role": "assistant",
+                    "content": raw_message.content or "",
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                        for tc in tool_calls
+                    ],
+                })
+
+                # Execute each tool call
+                for tc in tool_calls:
+                    fn_name = tc.function.name
+                    fn_args = json.loads(tc.function.arguments)
+
+                    logger.info(f"Executing tool: {fn_name}({fn_args})")
+
+                    result = await self._execute_tool(fn_name, fn_args)
+
+                    # Add tool result to history
+                    self.conversation_history.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": result,
+                    })
+
+            else:
+                # Regular text response
+                self.conversation_history.append(
+                    {"role": "assistant", "content": response_text}
+                )
+
+                # Generate TTS and play back
+                audio_data = await generate_tts_audio(response_text)
+                if audio_data:
+                    await self._play_audio(audio_data)
 
         except asyncio.CancelledError:
             pass
         except Exception as e:
             logger.error(f"Process after silence error: {e}")
+
+    async def _execute_tool(self, fn_name: str, fn_args: dict) -> str:
+        """Execute a tool call from the LLM and return the result string."""
+
+        if fn_name == "transfer_call":
+            phone_number = fn_args.get("phone_number", "")
+            announcement = fn_args.get(
+                "announcement",
+                f"Transferring your call to {phone_number}. Please hold.",
+            )
+
+            if not phone_number:
+                return "Error: No phone number provided for transfer."
+
+            # Play the announcement before transferring
+            logger.info(f"Transfer requested to {phone_number}")
+            audio_data = await generate_tts_audio(announcement)
+            if audio_data:
+                await self._play_audio(audio_data)
+                # Wait a moment for the audio to play
+                await asyncio.sleep(2)
+
+            # Call the Vobiz Transfer API
+            if not self.call_id:
+                return "Error: No call ID available for transfer."
+
+            success = await asyncio.get_event_loop().run_in_executor(
+                None, transfer_call_api, self.call_id, phone_number, announcement
+            )
+
+            if success:
+                return f"Call transfer initiated to {phone_number}."
+            else:
+                # If API transfer fails, tell the user
+                error_msg = "I'm sorry, I wasn't able to transfer the call. Please try again."
+                audio_data = await generate_tts_audio(error_msg)
+                if audio_data:
+                    await self._play_audio(audio_data)
+                return f"Transfer failed to {phone_number}."
+
+        elif fn_name == "end_call":
+            goodbye = fn_args.get(
+                "goodbye_message", "Goodbye! Have a great day!"
+            )
+
+            # Play goodbye message
+            logger.info("Hangup requested by LLM")
+            audio_data = await generate_tts_audio(goodbye)
+            if audio_data:
+                await self._play_audio(audio_data)
+                await asyncio.sleep(2)
+
+            # Call the Vobiz Hangup API
+            if self.call_id:
+                await asyncio.get_event_loop().run_in_executor(
+                    None, hangup_call_api, self.call_id
+                )
+
+            return "Call ended."
+
+        else:
+            logger.warning(f"Unknown tool: {fn_name}")
+            return f"Error: Unknown tool '{fn_name}'."
 
     async def _play_audio(self, mulaw_data: bytes):
         """Send audio to Vobiz via playAudio events in chunks."""
@@ -349,8 +666,17 @@ class CallSession:
 
             if event == "start":
                 self.stream_id = data.get("streamId")
-                self.call_id = data.get("callId")
-                logger.info(f"Stream started — streamId={self.stream_id}, callId={self.call_id}")
+                # callId can come from different fields depending on Vobiz version
+                start_data = data.get("start", {})
+                self.call_id = (
+                    data.get("callId")
+                    or start_data.get("callId")
+                    or start_data.get("callUUID")
+                    or data.get("CallUUID")
+                )
+                logger.info(
+                    f"Stream started — streamId={self.stream_id}, callId={self.call_id}"
+                )
 
                 # Start Deepgram STT
                 await self.start_deepgram()

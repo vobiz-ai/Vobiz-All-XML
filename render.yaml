@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: vobiz-voice-agent
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python server.py
+    envVars:
+      - key: SERVER_MODE
+        value: stream
+      - key: AGENT_WS_PORT
+        value: "8001"
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: DEEPGRAM_API_KEY
+        sync: false
+      - key: VOBIZ_AUTH_ID
+        sync: false
+      - key: VOBIZ_AUTH_TOKEN
+        sync: false
+      - key: FROM_NUMBER
+        sync: false
+      - key: TO_NUMBER
+        sync: false
+      - key: DIAL_TEST_NUMBER
+        sync: false
+      - key: OPENAI_TTS_VOICE
+        value: alloy
+      - key: AGENT_SYSTEM_PROMPT
+        value: "You are a helpful AI phone assistant. Be concise and conversational. Keep responses under 2 sentences."
