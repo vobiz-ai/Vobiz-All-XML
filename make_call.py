@@ -95,7 +95,8 @@ def make_call(to_number: str, from_number: str, answer_url: str, print_curl: boo
     _print_curl(from_number, to_number, answer_url)
 
     if print_curl:
-        return  # --curl flag: just print, don't call
+        # Also make the call when --curl is passed
+        pass
 
     try:
         response = requests.post(url, json=payload, headers=headers)
