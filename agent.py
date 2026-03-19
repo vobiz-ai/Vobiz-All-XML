@@ -630,7 +630,7 @@ class CallSession:
                         "payload": payload,
                     },
                 }
-                await self.ws.send(json.dumps(play_event))
+                await self.ws.send_text(json.dumps(play_event))
 
             # Send checkpoint after all audio chunks
             if self.stream_id:
@@ -639,7 +639,7 @@ class CallSession:
                     "streamId": self.stream_id,
                     "name": f"response-{len(self.conversation_history)}",
                 }
-                await self.ws.send(json.dumps(checkpoint_event))
+                await self.ws.send_text(json.dumps(checkpoint_event))
 
             logger.info(f"Sent {len(mulaw_data)} bytes of audio in chunks")
 
@@ -654,7 +654,7 @@ class CallSession:
                 "event": "clearAudio",
                 "streamId": self.stream_id,
             }
-            await self.ws.send(json.dumps(clear_event))
+            await self.ws.send_text(json.dumps(clear_event))
             self.is_playing = False
             logger.info("Sent clearAudio (barge-in)")
 
