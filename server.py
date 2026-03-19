@@ -894,7 +894,9 @@ async def websocket_handler(websocket: StarletteWebSocket):
 
 # ===========================================================================
 #  Main
-# ===========================================================================def _print_banner():
+# ===========================================================================
+
+def _print_banner():
     """Print startup banner with all important URLs."""
     logger.info("")
     logger.info(f"{'=' * 60}")
