@@ -388,7 +388,7 @@ class CallSession:
     """Manages state for a single phone call."""
 
     def __init__(self, ws):
-        self.ws = ws  # Vobiz WebSocket connection
+        self.ws = ws  # Vobiz WebSocket (Starlette or websockets)
         self.stream_id: str | None = None
         self.call_id: str | None = None
         self.is_playing = False
@@ -399,6 +399,13 @@ class CallSession:
         self.silence_timer: asyncio.Task | None = None
         self.deepgram_ws = None
         self._deepgram_task: asyncio.Task | None = None
+
+    async def _send(self, data: str):
+        """Send text — works with Starlette WebSocket (send_text) and websockets (send)."""
+        if hasattr(self.ws, "send_text"):
+            await self.ws.send_text(data)   # Starlette / FastAPI
+        else:
+            await self.ws.send(data)        # websockets library
 
     async def start_deepgram(self):
         """Connect to Deepgram via raw WebSocket for live transcription."""
@@ -630,7 +637,7 @@ class CallSession:
                         "payload": payload,
                     },
                 }
-                await self.ws.send_text(json.dumps(play_event))
+                await self._send(json.dumps(play_event))
 
             # Send checkpoint after all audio chunks
             if self.stream_id:
@@ -639,7 +646,7 @@ class CallSession:
                     "streamId": self.stream_id,
                     "name": f"response-{len(self.conversation_history)}",
                 }
-                await self.ws.send_text(json.dumps(checkpoint_event))
+                await self._send(json.dumps(checkpoint_event))
 
             logger.info(f"Sent {len(mulaw_data)} bytes of audio in chunks")
 
@@ -654,7 +661,7 @@ class CallSession:
                 "event": "clearAudio",
                 "streamId": self.stream_id,
             }
-            await self.ws.send_text(json.dumps(clear_event))
+            await self._send(json.dumps(clear_event))
             self.is_playing = False
             logger.info("Sent clearAudio (barge-in)")
 

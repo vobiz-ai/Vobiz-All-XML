@@ -934,7 +934,12 @@ def setup_ngrok():
     if NGROK_AUTH_TOKEN:
         conf.get_default().auth_token = NGROK_AUTH_TOKEN
 
-    http_tunnel = ngrok.connect(HTTP_PORT, "http")
+    # Try with pooling enabled first (handles case where tunnel is already online)
+    try:
+        http_tunnel = ngrok.connect(HTTP_PORT, "http", pooling_enabled=True)
+    except Exception:
+        http_tunnel = ngrok.connect(HTTP_PORT, "http")
+
     url = http_tunnel.public_url
     if url.startswith("http://"):
         url = url.replace("http://", "https://")
