@@ -3,7 +3,7 @@
 # ec2-setup.sh — One-shot setup script for Ubuntu EC2 (t2.micro / t3.micro)
 #
 # Run this ONCE on a fresh EC2 instance:
-#   curl -fsSL https://raw.githubusercontent.com/vobiz-ai/Vobiz-All-XML/main/ec2-setup.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/vobiz-ai/Vobiz-All-XML-python/main/ec2-setup.sh | bash
 #
 # Or copy it to the instance and run:
 #   chmod +x ec2-setup.sh && ./ec2-setup.sh
@@ -63,12 +63,12 @@ echo "[3/6] Docker Compose installed: $(docker-compose --version)"
 echo "[4/6] Cloning Vobiz Voice Agent repo..."
 cd /home/ubuntu
 
-if [ -d "Vobiz-All-XML" ]; then
+if [ -d "Vobiz-All-XML-python" ]; then
     echo "  Repo already exists — pulling latest..."
-    cd Vobiz-All-XML && git pull
+    cd Vobiz-All-XML-python && git pull
 else
-    git clone https://github.com/vobiz-ai/Vobiz-All-XML.git
-    cd Vobiz-All-XML
+    git clone https://github.com/vobiz-ai/Vobiz-All-XML-python.git
+    cd Vobiz-All-XML-python
 fi
 
 # ---------------------------------------------------------------------------
@@ -81,7 +81,7 @@ if [ ! -f ".env" ]; then
     echo "  *** .env created from .env.example ***"
     echo "  You MUST edit it before starting:"
     echo ""
-    echo "    nano /home/ubuntu/Vobiz-All-XML/.env"
+    echo "    nano /home/ubuntu/Vobiz-All-XML-python/.env"
     echo ""
     echo "  Required values to fill in:"
     echo "    OPENAI_API_KEY=..."
@@ -106,7 +106,7 @@ echo "  NEXT STEPS"
 echo "=========================================="
 echo ""
 echo "1. Edit your .env file:"
-echo "   nano /home/ubuntu/Vobiz-All-XML/.env"
+echo "   nano /home/ubuntu/Vobiz-All-XML-python/.env"
 echo ""
 echo "2. Set PUBLIC_URL to your EC2 public DNS:"
 echo "   PUBLIC_URL=https://$(curl -s http://169.254.169.254/latest/meta-data/public-hostname 2>/dev/null || echo '<your-ec2-public-dns>')"
@@ -116,7 +116,7 @@ echo "   AWS Console → EC2 → Security Groups → Inbound Rules → Add:"
 echo "   Type: Custom TCP | Port: 8000 | Source: 0.0.0.0/0"
 echo ""
 echo "4. Start the agent:"
-echo "   cd /home/ubuntu/Vobiz-All-XML"
+echo "   cd /home/ubuntu/Vobiz-All-XML-python"
 echo "   sudo newgrp docker  # or log out and back in"
 echo "   docker-compose up -d"
 echo ""
