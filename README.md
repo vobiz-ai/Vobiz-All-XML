@@ -120,14 +120,14 @@ python make_call.py --test-endpoint test-record
 The AI agent has two tools it can invoke mid-conversation:
 
 ### `transfer_call`
-Triggered when the caller says something like *"transfer me to +91 89398 94913"*.
+Triggered when the caller says something like *"transfer me to +1 555 000 3333"*.
 
 **Flow:**
-1. GPT detects intent → calls `transfer_call(phone_number="+918939894913")`
+1. GPT detects intent → calls `transfer_call(phone_number="+15550003333")`
 2. Agent plays announcement via TTS: *"Transferring your call now. Please hold."*
 3. Agent POSTs to Vobiz Transfer API: `POST /Account/{id}/Call/{uuid}/`
-4. Vobiz interrupts the Stream and fetches `/transfer-to-number?number=+918939894913`
-5. That endpoint returns `<Dial><Number>+918939894913</Number></Dial>` XML
+4. Vobiz interrupts the Stream and fetches `/transfer-to-number?number=+15550003333`
+5. That endpoint returns `<Dial><Number>+15550003333</Number></Dial>` XML
 6. Caller is connected to the target number
 
 ### `end_call`
@@ -163,8 +163,8 @@ Receives JSON events:
 {
   "Event": "CallInitiated",
   "CallUUID": "uuid",
-  "From": "+917971542961",
-  "To": "+918939894913",
+  "From": "+15550001111",
+  "To": "+15550003333",
   "Allowed": true,
   "Reason": ""
 }
@@ -291,7 +291,7 @@ The startup banner shows your ngrok URL:
 **Make an outbound call:**
 ```bash
 python make_call.py                              # calls TO_NUMBER from .env
-python make_call.py --to +919876543210           # specific number
+python make_call.py --to +15550003333           # specific number
 python make_call.py --curl                       # print curl + make call
 python make_call.py --test-endpoint test-speak   # jump to specific test
 ```
@@ -389,6 +389,19 @@ sudo docker compose down && sudo docker compose up -d  # full restart
 
 ---
 
+## Built by Team Vobiz
+
+[Vobiz](https://vobiz.ai) is a programmable voice & SIP-trunking platform for
+voice APIs, SIP trunking, and AI voice agents. This repository is built and
+maintained by the Vobiz team.
+
+**Maintainer:** Piyush Sahoo — [piyush@vobiz.ai](mailto:piyush@vobiz.ai) · [LinkedIn](https://www.linkedin.com/in/piyush-s713/)
+
+Questions, or want to talk through an integration? Open an issue on this repo,
+or reach out directly at [piyush@vobiz.ai](mailto:piyush@vobiz.ai).
+
+**Useful links:** [Docs](https://docs.vobiz.ai) · [API reference](https://docs.vobiz.ai/api-reference) · [Sign up](https://vobiz.ai)
+
 ## License
 
-MIT License. Built on [Vobiz](https://vobiz.ai) telephony infrastructure.
+[MIT](./LICENSE) © Vobiz

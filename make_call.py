@@ -5,10 +5,10 @@ Triggers a call from your Vobiz number to a destination number.
 
 Usage:
   python make_call.py                              # Call TO_NUMBER via auto-detected server
-  python make_call.py --to +919876543210           # Call a specific number
+  python make_call.py --to +15550003333           # Call a specific number
   python make_call.py --test-endpoint test-speak   # Jump directly to a test endpoint
   python make_call.py --curl                       # Print curl command only (don't call)
-  python make_call.py --to +919876543210 --curl    # Print curl for a specific number
+  python make_call.py --to +15550003333 --curl    # Print curl for a specific number
 """
 
 import os
@@ -171,9 +171,9 @@ def main():
         epilog="""
 Examples:
   python make_call.py                                         # Call TO_NUMBER via auto-detected URL
-  python make_call.py --to +919876543210                      # Call a specific number
+  python make_call.py --to +15550003333                      # Call a specific number
   python make_call.py --curl                                  # Print curl command only
-  python make_call.py --to +919876543210 --curl               # Print curl for specific number
+  python make_call.py --to +15550003333 --curl               # Print curl for specific number
   python make_call.py --test-endpoint test-speak              # Jump to Speak XML test
   python make_call.py --test-endpoint test-stream --curl      # Print curl for Stream test
   python make_call.py --answer-url https://vobiz-all-xml.onrender.com/answer  # Use Render URL
@@ -188,14 +188,14 @@ Available --test-endpoint values:
         "--to",
         type=str,
         default=TO_NUMBER,
-        help="Destination phone number in E.164 format (e.g. +919876543210)",
+        help="Destination phone number in E.164 format (e.g. +15550003333)",
     )
     parser.add_argument(
         "--from",
         dest="from_number",
         type=str,
         default=FROM_NUMBER,
-        help="Caller ID — your Vobiz DID number (e.g. +911171366941)",
+        help="Caller ID — your Vobiz DID number (e.g. +15550001111)",
     )
     parser.add_argument(
         "--answer-url",

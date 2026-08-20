@@ -78,7 +78,7 @@ AGENT_TOOLS = [
                         "type": "string",
                         "description": (
                             "The phone number to transfer to, in E.164 format "
-                            "(e.g., +919876543210 or +14155551234). "
+                            "(e.g., +15550003333 or +14155551234). "
                             "Include country code."
                         ),
                     },
